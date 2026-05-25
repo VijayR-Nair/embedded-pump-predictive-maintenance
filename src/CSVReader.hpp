@@ -19,7 +19,7 @@ public:
 
 private:
     std::ifstream file_stream_;
-    bool has_header_{true};
+    bool has_header_ = true; 
 };
 
 } // namespace SmartSensor

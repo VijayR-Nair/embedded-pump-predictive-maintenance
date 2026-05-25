@@ -36,13 +36,13 @@ std::optional<SensorPacket> CSVReader::next_frame() {
     
     SensorPacket packet{};
 
+    if (std::getline(ss, token, ',')) { /* skip */ }
+
     // 1. Timestamp
     if (std::getline(ss, token, ',')) {
-        // token.c_str() converts the std::string into a raw const char* pointer
         std::strncpy(packet.timestamp, token.c_str(), TIMESTAMP_LEN - 1);
-        packet.timestamp[TIMESTAMP_LEN - 1] = '\0'; // Direct null-termination safety
+        packet.timestamp[TIMESTAMP_LEN - 1] = '\0';
     }
-
     // 2. 51 Sensors
     for (size_t i = 0; i < NUM_SENSORS; ++i) {
         if (std::getline(ss, token, ',')) {
