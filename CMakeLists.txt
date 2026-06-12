@@ -27,6 +27,19 @@ elseif(MSVC)
     add_compile_options(/W4 /WX)
 endif()
 
+# Fetch external dependencies
+include(FetchContent)
+
+FetchContent_Declare(
+    tflite_micro
+    GIT_REPOSITORY https://github.com/tensorflow/tflite-micro.git
+    GIT_TAG main
+    SOURCE_DIR ${CMAKE_BINARY_DIR}/_deps/tflite_micro-src
+    BINARY_DIR ${CMAKE_BINARY_DIR}/_deps/tflite_micro-build
+)
+
+FetchContent_MakeAvailable(tflite_micro)
+
 # 4. Include directories (Tells CMake where your header files live)
 # This mimics the "include/smart_sensor/" structure we planned
 include_directories(include)
@@ -39,6 +52,12 @@ file(GLOB_RECURSE SRC_FILES
 
 # 6. Define the final executable binary
 add_executable(${PROJECT_NAME} ${SRC_FILES})
+
+target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        ${CMAKE_BINARY_DIR}/_deps/tflite_micro-src
+)
+
 
 # 7. Print a helpful message when configuration finishes
 message(STATUS "Configured ${PROJECT_NAME} successfully using ${CMAKE_CXX_COMPILER_ID}")
