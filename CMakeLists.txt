@@ -56,8 +56,15 @@ add_executable(${PROJECT_NAME} ${SRC_FILES})
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_BINARY_DIR}/_deps/tflite_micro-src
+        ${CMAKE_BINARY_DIR}/_deps/tflite_micro-src/third_party/flatbuffers/include
+        ${CMAKE_BINARY_DIR}/_deps/tflite_micro-src/third_party/gemmlowp
+        ${CMAKE_BINARY_DIR}/_deps/tflite_micro-src/third_party/ruy
 )
 
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        tensorflow-lite-micro
+)
 
 # 7. Print a helpful message when configuration finishes
 message(STATUS "Configured ${PROJECT_NAME} successfully using ${CMAKE_CXX_COMPILER_ID}")
