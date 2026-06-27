@@ -43,15 +43,11 @@ std::optional<SensorPacket> CSVReader::next_frame() {
         std::strncpy(packet.timestamp, token.c_str(), TIMESTAMP_LEN - 1);
         packet.timestamp[TIMESTAMP_LEN - 1] = '\0';
     }
-    // 2. 51 Sensors
-    for (size_t i = 0; i < NUM_SENSORS; ++i) {
-        if (std::getline(ss, token, ',')) {
-            try {
-                packet.sensor_readings[i] = token.empty() ? 0.0f : std::stof(token);
-            } catch (...) {
-                packet.sensor_readings[i] = 0.0f;
-            }
-        }
+    // 2. 51 Sensors (52 columns in CSV; col 15 = sensor_15 is always empty, skip it)
+    for (size_t col = 0, i = 0; col < 52 && i < NUM_SENSORS; ++col) {
+        if (!std::getline(ss, token, ',')) break;
+        if (col == 15) continue;                      // skip sensor_15 (not in model)
+        packet.sensor_readings[i++] = token.empty() ? 0.0f : std::stof(token);
     }
 
     // 3. Status

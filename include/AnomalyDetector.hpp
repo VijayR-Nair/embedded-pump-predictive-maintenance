@@ -1,35 +1,26 @@
 #ifndef ANOMALYDETECTOR_HPP
 #define ANOMALYDETECTOR_HPP
 
-
 #include "tensorflow/lite/micro/micro_interpreter.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
-#include "tensorflow/lite/micro/all_ops_resolver.h"
+#include "tensorflow/lite/micro/tflite_bridge/micro_error_reporter.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
 #include "tensorflow/lite/schema/schema_generated.h"
 
-namespace SmartSensor{
+namespace SmartSensor {
 
-
-class AnomalyDetector{
-
+class AnomalyDetector {
 
     private:
-    tflite::MicroErrorReporter  error_reporter_;
-    tflite::AllOpsResolver      resolver_;
-    uint8_t                     tensor_arena_[10 * 1024];
-    tflite::MicroInterpreter*   interpreter_;
-
+    tflite::MicroMutableOpResolver<10>  resolver_;
+    static uint8_t                      tensor_arena_[60 * 1024];
+    tflite::MicroInterpreter*           interpreter_;    // ← type was missing
 
     public:
     AnomalyDetector();
     float predict(const float* sensor_data, int data_length);
 
+}; // AnomalyDetector
 
-}; //AnomalyDetector
-} //namespace SmartSensor
+} // namespace SmartSensor
 
-
-
-
-
-#endif //ANOMALYDETECTOR.HPP
+#endif // ANOMALYDETECTOR_HPP
