@@ -1,165 +1,92 @@
-# Embedded Pump Predictive Maintenance Engine
+# Embedded Pump Anomaly Detector
 
-An industrial-grade, zero-allocation C++ Software-in-the-Loop (SIL) pipeline for real-time anomaly detection on smart edge sensors, powered by a quantized TensorFlow Lite for Microcontrollers autoencoder.
-
-This project bridges the gap between high-dimensional industrial sensor streams (simulated using the [Kaggle Water Pump dataset](https://www.kaggle.com/datasets/nphantawee/pump-sensor-data)) and the highly constrained environments of edge microcontrollers such as the ESP32 or ARM Cortex-M series.
+> Catching pump failures before they happen — on a microcontroller, in real time, with no cloud required.
 
 <img width="1024" height="559" alt="SIL Architecture" src="https://github.com/user-attachments/assets/21de00cb-ad8d-4acf-97d8-210e5b130439" />
 
 ---
 
-## The Philosophy: Software-in-the-Loop
+## The Problem
 
-Deploying ML prototypes directly onto high-voltage physical industrial motors is impractical during early-stage development. This project implements a **SIL paradigm**: the C++ inference engine treats each CSV row as a real-time sensor interrupt. Because the data processing layer is decoupled from the ingestion layer, **95% of the codebase remains identical when flashed onto physical hardware** — only the low-level peripheral driver changes.
+Industrial pumps fail. When they do, it's expensive — unplanned downtime, damaged equipment, sometimes dangerous situations. The telltale signs are almost always there in the sensor data beforehand: subtle drifts in pressure, temperature, flow rate. The question is whether anything is *listening*.
 
----
+The obvious answer is to throw an ML model at it. The less obvious problem: the sensors live on edge hardware — ESP32s, ARM Cortex-M chips — with kilobytes of RAM and no internet connection. You can't run a Python server next to a pump in a factory floor.
 
-## Model: Quantized Autoencoder
-
-### Architecture
-
-```
-Input (51 sensors)  →  Dense(16, ReLU)  →  Dense(8, ReLU)  →  Dense(16, ReLU)  →  Dense(51, linear)
-```
-
-The model is an **int8-quantized autoencoder** compiled with TensorFlow Lite for Microcontrollers. It learns to reconstruct normal pump sensor readings; reconstruction error (MSE) spikes when the pump deviates from its trained operating envelope.
-
-| Property | Value |
-|---|---|
-| Input features | 51 sensors (sensor_00–sensor_51, excluding sensor_15) |
-| Quantization | Full int8 (weights + activations) |
-| Input tensor | shape `[1, 51]`, int8, scale=0.2029, zero_point=-67 |
-| Output tensor | shape `[1, 51]`, int8, scale=0.1348, zero_point=-53 |
-| Arena size | 60 KB (static BSS allocation) |
-| Operators | FullyConnected, ReLU, Quantize, Dequantize |
-| Runtime | TensorFlow Lite for Microcontrollers |
-
-### Preprocessing Pipeline
-
-Each frame goes through the same pipeline as training before inference:
-
-1. **Median imputation** — zero or missing sensor readings are replaced with the per-sensor median computed from all 205,836 NORMAL frames
-2. **Z-score normalisation** — `z = (x − mean) / std` using StandardScaler fitted on all NORMAL frames
-3. **Int8 quantisation** — `q = clip(round(z / scale + zero_point), −128, 127)`
-
-### Why Retrain on All NORMAL Data
-
-The initial model was trained on only the first ~10,000 NORMAL rows. The full dataset contains multiple pump operating regimes: for example, `sensor_19` ranges from 249 to 664 across the dataset. With the original narrow scaler (std=5.03), frames from later regimes produced z-scores up to **−82**, causing a **94.9% false positive rate**.
-
-Refitting the scaler and retraining on all 205,836 NORMAL rows expanded `sensor_19` std from **5.03 → 205.05**, bringing the FPR down to **1.0%** at the chosen operating threshold.
+This project is the answer to that problem.
 
 ---
 
-## Dataset
+## The Approach: Test on the Laptop, Deploy to the Chip
 
-| Label | Count | % |
-|---|---|---|
-| NORMAL | 205,836 | 93.4% |
-| RECOVERING | 14,477 | 6.6% |
-| BROKEN | 7 | <0.1% |
-| **Total** | **220,320** | |
+Flashing experimental ML onto live industrial hardware during development is a terrible idea. Instead, this project uses a **Software-in-the-Loop (SIL)** strategy:
 
-CSV structure: 1 unnamed index column + `timestamp` + 52 sensor columns (sensor_15 always empty, excluded) + `machine_status`.
+The C++ inference engine treats each row of a CSV file as if it were a live sensor interrupt. The pump data (220,320 real readings from the [Kaggle Water Pump dataset](https://www.kaggle.com/datasets/nphantawee/pump-sensor-data)) streams through the pipeline exactly the way real I2C sensor bursts would on physical hardware.
+
+The payoff: **95% of the codebase is identical between the laptop simulation and the embedded target.** When it's time to deploy to an ESP32, only the low-level data source changes — everything from preprocessing to inference stays untouched.
 
 ---
 
-## Evaluation Results
+## How It Works
 
-All evaluation runs the **C++ SIL binary** against the full 220,320-frame dataset. Python inference (TFLite runtime) is used only for threshold selection.
+### The Model: Teaching the Pump What "Normal" Looks Like
 
-### MSE Distribution by Label
-
-| Label | n | p25 | p50 | p75 | p90 | p99 | max |
-|---|---|---|---|---|---|---|---|
-| NORMAL | 205,836 | 0.100 | 0.148 | 0.252 | 0.622 | 2.070 | 112.0 |
-| RECOVERING | 14,477 | 3.057 | 3.952 | 17.181 | 19.809 | 26.958 | 105.5 |
-| BROKEN | 7 | 1.019 | 1.552 | 11.836 | 19.486 | 20.348 | 20.4 |
-
-The NORMAL and RECOVERING distributions separate cleanly: NORMAL p99 = 2.07 sits well below RECOVERING p50 = 3.95.
-
-### Threshold Sweep
-
-| Threshold | TP | FP | TN | FN | Precision | Recall | F1 | FPR |
-|---|---|---|---|---|---|---|---|---|
-| 0.80 | 14,447 | 17,958 | 187,878 | 37 | 44.6% | 99.7% | 0.616 | 8.72% |
-| 1.00 | 14,372 | 13,855 | 191,981 | 112 | 50.9% | 99.2% | 0.673 | 6.73% |
-| 1.029 | 14,348 | 13,192 | 192,644 | 136 | 52.1% | 99.1% | 0.683 | 6.41% |
-| 1.20 | 14,045 | 10,239 | 195,597 | 439 | 57.8% | 97.0% | 0.725 | 4.97% |
-| 1.50 | 13,456 | 6,073 | 199,763 | 1,028 | 68.9% | 92.9% | 0.791 | 2.95% |
-| **2.07** ★ | **12,688** | **2,056** | **203,780** | **1,796** | **86.1%** | **87.6%** | **0.868** | **1.00%** |
-| 2.50 | 11,637 | 1,161 | 204,675 | 2,847 | 90.9% | 80.3% | 0.853 | 0.56% |
-| 3.00 | 11,014 | 664 | 205,172 | 3,470 | 94.3% | 76.0% | 0.842 | 0.32% |
-
-**Selected threshold: 2.07** (NORMAL p99) — best F1 of 0.868.
-
-### Confusion Matrix at Threshold = 2.07
+The detector is an **autoencoder** — a neural network trained to compress and reconstruct normal pump sensor readings. When the pump is healthy, it reconstructs well. When something goes wrong, reconstruction error (MSE) spikes. That spike is the alarm.
 
 ```
-                       Pred NORMAL    Pred ANOMALY
-  Actual NORMAL          203,780           2,056
-  Actual ANOMALY           1,796          12,688
+51 sensors → Dense(16) → Dense(8) → Dense(16) → 51 outputs
 ```
+
+The model is quantized to **int8** so it fits on a microcontroller. The full precision weights compress down to an arena that fits in 60 KB of static RAM — no heap allocation, no dynamic memory, no fragmentation.
+
+### The Preprocessing Pipeline
+
+Before any sensor reading reaches the model, it goes through three steps — the same three steps used during training:
+
+1. **Median imputation** — dead or missing sensors get replaced with their historical median (computed from 205,836 normal frames)
+2. **Z-score normalisation** — each sensor scaled to zero mean, unit variance
+3. **Int8 quantisation** — floats clamped and mapped to `[-128, 127]` for the TFLite Micro runtime
+
+---
+
+## Results
+
+Evaluated against the full 220,320-frame dataset using the C++ SIL binary:
 
 | Metric | Value |
 |---|---|
-| True Positives (TP) | 12,688 |
-| False Positives (FP) | 2,056 |
-| True Negatives (TN) | 203,780 |
-| False Negatives (FN) | 1,796 |
-| Precision | 86.1% |
-| Recall (overall) | 87.6% |
 | F1 Score | **0.868** |
-| False Positive Rate | **1.00%** |
-| Recall — RECOVERING | 87.5% (12,668 / 14,477) |
-| Recall — BROKEN | 100.0% (7 / 7) |
+| Precision | 86.1% |
+| Recall | 87.6% |
+| False Positive Rate | **1.0%** |
+| Recall — BROKEN frames | **100%** (7/7) |
 
-### Live C++ Pipeline Output
+At the operating threshold (MSE = 2.07), the pipeline flagged 14,169 anomalies — within 4% of the Python reference sweep, with the gap explained entirely by int8 rounding differences.
 
-```
-[INFO] Processing Kaggle Pump Data Stream...
-[SUCCESS] Processed 220320 frames. Anomalies detected: 14169
-```
+### The False Positive Story
 
-14,169 flagged (6.4%) vs true anomaly rate 6.6% — within 4% of the Python sweep prediction, with the delta explained by int8 rounding differences between TFLite Micro and the full TFLite runtime.
+The first model had a **94.9% false positive rate** — nearly every normal frame triggered an alarm. The culprit: the scaler was fitted on only the first ~10,000 rows of training data, missing several pump operating regimes entirely. One sensor (`sensor_19`) ranged from 249 to 664 across the dataset, but the narrow scaler had fitted a std of 5.03. Later frames produced z-scores of **−82** and the model had never seen anything like them.
 
----
-
-## Operating Points
-
-### High-Recall Mode (`threshold = 0.80`)
-- **Recall: 99.7%** — misses only 37 of 14,484 anomalies
-- FPR: 8.72% on NORMAL frames
-- Use when **missing a failure is unacceptable** (unplanned downtime, critical pump)
-
-### Balanced Mode (`threshold = 2.07`) ← current
-- **F1: 0.868**, Precision 86.1%, Recall 87.6%
-- FPR: **1.00%** — operators receive reliable, low-noise alerts
-- Use when **alarm fatigue matters**
+The fix: refit the scaler and retrain on all 205,836 normal frames. `sensor_19`'s std went from 5.03 to 205.05. The FPR dropped from 94.9% to 1.0%.
 
 ---
 
-## Key Engineering Fixes
+## Two Operating Modes
 
-| Bug | Symptom | Fix |
-|---|---|---|
-| Linker: `MicroPrintf` undefined | Link error | Added `micro_log.cc`, `debug_log.cc` to CMake sources |
-| FlatBuffers misalignment | Segfault / MSE = 1.93×10¹⁶ | Added `alignas(8)` to model array |
-| ABI mismatch (`TF_LITE_STATIC_MEMORY`) | Wrong scale read → garbage MSE | Added `-DTF_LITE_STATIC_MEMORY` compile flag |
-| `tensor_arena_` on stack | MSE = 834,911 (arena overlapped `data[]`) | Made `tensor_arena_` a `static` class member (BSS) |
-| `sensor_15` column offset | Feature misalignment from col 14 onward | Skip col 15 in CSVReader loop |
-| Scaler fitted on 10K rows | 94.9% FPR | Retrain scaler + model on all 205,836 NORMAL rows |
-| `src/model_data.h` shadowing `include/model_data.h` | Old model loaded after rebuild | Deleted stale `src/model_data.h` |
+Depending on the deployment context, you can tune the threshold:
+
+**Balanced** (`threshold = 2.07`) — current default
+- F1: 0.868, FPR: 1.0%
+- Operators get reliable, low-noise alerts
+
+**High-Recall** (`threshold = 0.80`)
+- Recall: 99.7%, misses only 37 of 14,484 anomalies
+- For situations where missing a failure is unacceptable
 
 ---
 
-## Building and Running
+## Build & Run
 
-### Prerequisites
-- C++17 compiler (GCC, Clang)
-- CMake 3.14+
-- Internet access on first build (FetchContent downloads TFLite Micro)
-
-### Build
+**Prerequisites:** GCC or Clang (C++17), CMake 3.14+, internet on first build (FetchContent pulls TFLite Micro).
 
 ```bash
 mkdir build && cd build
@@ -167,19 +94,23 @@ cmake ..
 cmake --build . --parallel 4
 ```
 
-### Run
-
-Place the [Kaggle sensor dataset](https://www.kaggle.com/datasets/nphantawee/pump-sensor-data) at `data/sensor.csv`, then:
+Place the [Kaggle sensor CSV](https://www.kaggle.com/datasets/nphantawee/pump-sensor-data) at `data/sensor.csv`, then:
 
 ```bash
 ./build/SmartSensorAnomaly
+```
+
+Expected output:
+```
+[INFO] Processing Kaggle Pump Data Stream...
+[SUCCESS] Processed 220320 frames. Anomalies detected: 14169
 ```
 
 ---
 
 ## Roadmap
 
-- [x] **Phase 1** — High-speed CSV stream parser (SensorPacket, CSVReader, CircularBuffer)
-- [x] **Phase 2** — Edge DSP preprocessing (median imputation, z-score normalisation)
-- [x] **Phase 3** — TinyML inference (int8 autoencoder via TFLite Micro, threshold sweep, validation)
-- [ ] **Phase 4** — Hardware abstraction (`ISensorDriver`) to swap CSV simulator for I2C/SPI sensor reads on ESP32 / Cortex-M
+- [x] Phase 1 — CSV stream parser (`SensorPacket`, `CSVReader`, `CircularBuffer`)
+- [x] Phase 2 — Edge DSP preprocessing (median imputation, z-score, int8 quantisation)
+- [x] Phase 3 — TinyML inference (int8 autoencoder, threshold sweep, full dataset validation)
+- [ ] Phase 4 — Hardware abstraction (`ISensorDriver`) to swap the CSV simulator for real I2C/SPI reads on ESP32 / Cortex-M
