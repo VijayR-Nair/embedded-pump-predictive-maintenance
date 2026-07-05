@@ -4,8 +4,8 @@
 #include "Preprocessor.hpp"
 #include <iostream>
 
-// 99th percentile reconstruction MSE from Colab training (metadata.json)
-const float THRESHOLD = 2.07f;
+// 99th percentile reconstruction MSE on NORMAL data, calibrated for INT8 quantization
+const float THRESHOLD = 4.455676f;
 
 int main() {
     SmartSensor::CSVReader reader("data/sensor.csv");
