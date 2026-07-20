@@ -4,14 +4,17 @@
 
 namespace SmartSensor {
 
-CSVReader::CSVReader(const std::string& file_path) {
-    file_stream_.open(file_path);
-}
+CSVReader::CSVReader(const std::string& file_path) : file_path_(file_path) {}
 
 CSVReader::~CSVReader() {
     if (file_stream_.is_open()) {
         file_stream_.close();
     }
+}
+
+bool CSVReader::begin() {
+    file_stream_.open(file_path_);
+    return file_stream_.is_open();
 }
 
 std::optional<SensorPacket> CSVReader::next_frame() {

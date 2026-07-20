@@ -10,7 +10,7 @@ const float THRESHOLD = 4.455676f;
 int main() {
     SmartSensor::CSVReader reader("data/sensor.csv");
 
-    if (!reader.is_open()) {
+    if (!reader.begin()) {
         std::cerr << "[ERROR] Place your Kaggle sensor.csv in 'data/'" << std::endl;
         return -1;
     }
